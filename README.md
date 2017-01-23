@@ -59,7 +59,10 @@ $ git clone https://github.com/hamish2014/PDFMiner_tools
 ```python
 > import PDFMiner_tools
 > PDFMiner_tools.PDF_text_with_locations?
-> pdf = PDFMiner_tools.PDF_text_with_locations( open('ADXL345.pdf'),  record_rects=True)
+> pdf = PDFMiner_tools.PDF_text_with_locations( open('ADXL345.pdf'),  record_rects=True, pages = [5])
 > t = pdf.get( page=5, text__startswith ='Parameter' )
-not working yet ...
+> print(t)
+> table = PDFMiner_tools.parse_rect_table( pdf, 5 , t.bbox[0], t.bbox[1] )
+> for row in table:
+      print(row)
 ```

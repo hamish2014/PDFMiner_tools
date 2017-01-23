@@ -91,9 +91,10 @@ def get_words_before_text(main_text, text, count = 1):
 class TextPosCovertor(PDFConverter):
 
     def __init__(self, rsrcmgr, recorder , codec='utf-8', pageno=1,
-                 laparams=None, imagewriter=None):
-        PDFConverter.__init__(self, rsrcmgr, outfp=sys.stderr, codec='utf-8', pageno=1, laparams=None)
+                 laparams=None, imagewriter=None, pages = 'all'):
+        PDFConverter.__init__(self, rsrcmgr, outfp=sys.stderr, codec=codec, pageno=pageno, laparams=laparams)
         self.recorder =  recorder #custom class which is definied next
+        self.pages = pages
 
     def write_text(self, text):
         pass
@@ -113,6 +114,9 @@ class TextPosCovertor(PDFConverter):
         def render(item):
             if isinstance(item, LTPage):
                 #self.outfp.write('<page id="%s" bbox="%s" rotate="%d">\n' % (item.pageid, bbox2str(item.bbox), item.rotate))
+                if self.pages != 'all':
+                    if not item.pageid in self.pages:
+                        return
                 self.recorder.set_page( item.pageid )
                 for child in item:
                     render(child)
@@ -180,6 +184,7 @@ class PDF_text_get_Error(Exception):
 class PDF_text_with_locations:
     def __init__( self, pdf_fp, 
                   convert_to_lower_case=True,
+                  pages = 'all',
                   char_margin = 0.2,
                   line_margin = 0.1,
                   space_margin = 1.0,  
@@ -187,6 +192,8 @@ class PDF_text_with_locations:
                   record_lines = False,
                   record_rects = False
                   ):
+        "if pages != 'all' then contents only passed if page in pages"
+
         self.text_groups = {}
         self.char_margin = char_margin
         self.space_margin = space_margin 
@@ -199,7 +206,7 @@ class PDF_text_with_locations:
         if record_rects:
             self.rects = {}
         rsrcmgr = PDFResourceManager()
-        device = TextPosCovertor(rsrcmgr, self)
+        device = TextPosCovertor(rsrcmgr, self, pages=pages)
         interpreter = PDFPageInterpreter(rsrcmgr, device)
         for page in PDFPage.get_pages( pdf_fp, check_extractable=False ):
             interpreter.process_page(page)
@@ -372,16 +379,22 @@ def parse_rect_table( pdf, page_no, x, y, table_spans_pages_with = True, tol=2, 
             assert r.x0 < r.x1
             assert r.y0 < r.y1
             v_lines.append(r)
-    #print( h_line_start )
+    #log( 'h_lines %s' %  h_lines )
+    #log( 'v_lines %s' %  v_lines  )
+    #log( h_line_start )
     HL = [ r for r in h_lines if r.y0 == h_line_start.y0 ] 
-    x_min = min( r.x0 for r in HL )
-    x_max = max( r.x1 for r in HL )
-    #print( len(HL), x_min, x_max )
-    M = [ r for r in v_lines if abs(r.x0 - x_min) < tol and abs( r.y0 -  h_line_start.y0 ) < tol ]
-    assert len(M) == 1, "len(M) != 1, len(M) = %i" % len(M)
+    table_X = sorted([r.x0 for r in HL]) + [max(r.x1 for r in HL)]
+    log( 'len(HL) %i, x_min %4.2f, x_max %4.2f' % (len(HL), min(table_X), max(table_X) ) )
+    table_X_search = sorted( table_X, key= lambda x_v: abs(x_v-x)) #start search for v_line, with candiates, closest left to x given preference
+    for x_v in table_X_search:
+        M = [ r for r in v_lines if abs(r.x0 - x_v) < tol and ( abs( r.y0 -  h_line_start.y0 ) < tol or abs( r.y1 -  h_line_start.y0 ) < tol )  ]
+        log( 'searching for table v_line connected to HL: %s %i' % (x_v, len(M) ) )
+        if len(M) == 1: #then 1 v_line attached to vertex [x_v,  h_line_start.y0 ]
+            break
+    assert len(M) == 1, "Unable to find vertical line which intersects horizontal line: len(M) != 1, len(M) = %i" % len(M)
     v_line_start = M[0]
     #print( v_line_start )
-    VL_candidates = [ r for r in v_lines if abs(r.x0 - x_min) < tol ]
+    VL_candidates = [ r for r in v_lines if abs(r.x0 - x_v) < tol ]
     #print( VL_candidates )
     VL = [ v_line_start ]
     def line_walk( add, append  ):
@@ -400,7 +413,6 @@ def parse_rect_table( pdf, page_no, x, y, table_spans_pages_with = True, tol=2, 
     line_walk( lambda r: abs(r.y0 - VL[-1].y1) < tol, append=True )
     #print( len(VL) )
 
-    table_X = sorted([r.x0 for r in HL]) + [max(r.x1 for r in HL)]
     table_Y = sorted([r.y0 for r in VL]) + [max(r.y1 for r in VL)]
     log('table_X: %s' % ', '.join( '%i'%v for v in table_X) )
     log('table_Y: %s' % ', '.join( '%i'%v for v in table_Y))
